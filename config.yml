@@ -1,11 +1,11 @@
 services:
-- port: 3000
-  vip: fc00::1
-  addr_pool: fc10::/64
-  upstream:
-  - addr: ::1
-    port: 3001
-  - addr: ::1
-    port: 3002
-  - addr: ::1
-    port: 3003
+  - port: 3000
+    vip: fc00::1
+    addr_pool: fc10::/64
+    upstream:
+      - addr: ::1
+        port: 3001
+      - addr: ::1
+        port: 3002
+      - addr: ::1
+        port: 3003

@@ -1,6 +1,5 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 #include <linux/bpf.h>
 #include <linux/if_ether.h>
 #include <linux/ip.h>
@@ -18,25 +17,27 @@
     if ((void *)(target + 1) > end) \
         return XDP_DROP;
 
+#define bpf_printk(fmt, ...)                       \
+    ({                                             \
+        char ____fmt[] = fmt;                      \
+        bpf_trace_printk(____fmt, sizeof(____fmt), \
+                         ##__VA_ARGS__);           \
+    })
+
 struct services_key
 {
-    __u8 dst[16];
-    __u16 dport;
+    __u8 addr[16];
+    __u16 port;
 };
 
 struct services_value
 {
-    struct upstream *upstream;
-};
-
-struct upstream
-{
-    __u8 dst[16];
+    __u8 addr[16];
     __u16 port;
 };
 
 struct bpf_map_def SEC("maps") services = {
-    .type = BPF_MAP_TYPE_PERCPU_HASH,
+    .type = BPF_MAP_TYPE_ARRAY_OF_MAPS,
     .key_size = sizeof(struct services_key),
     .value_size = sizeof(struct services_value),
     .max_entries = MAX_SERVICE_COUNT,
@@ -52,15 +53,16 @@ static inline int process_tcphdr(struct xdp_md *ctx, struct ethhdr *eth, struct 
 
     assert_len(tcp, data_end);
 
-    memcpy(ipv6->ip6_dst.in6_u.u6_addr8, key.dst, sizeof(__u8[16]));
-    key.dport = tcp->dest;
+    for (int i = 0; i < 16; i++)
+        key.addr[i] = ipv6->ip6_dst.in6_u.u6_addr8[i];
+    key.port = tcp->dest;
 
     service = bpf_map_lookup_elem(&services, &key);
 
     if (service == NULL)
         return XDP_PASS;
 
-    return XDP_PASS;
+    return XDP_DROP;
 }
 
 static inline int process_ipv6hdr(struct xdp_md *ctx, struct ethhdr *eth)

@@ -14,22 +14,26 @@
 
 #define MAX_SERVICE_COUNT 64
 
-#define assert_len(target, end) if ((void *)(target + 1)> end) return XDP_DROP;
+#define assert_len(target, end)     \
+    if ((void *)(target + 1) > end) \
+        return XDP_DROP;
 
-struct services_key {
+struct services_key
+{
     __u8 dst[16];
     __u16 dport;
 };
 
-struct services_value {
+struct services_value
+{
     struct upstream *upstream;
 };
 
-struct upstream {
+struct upstream
+{
     __u8 dst[16];
     __u16 port;
 };
-
 
 struct bpf_map_def SEC("maps") services = {
     .type = BPF_MAP_TYPE_PERCPU_HASH,

@@ -54,4 +54,4 @@ $(XDP_OBJ): %.o: %.c
 	    -Wno-compare-distinct-pointer-types \
 	    -O2 -emit-llvm -c -g $<
 	$(LLC) -march=bpf -filetype=obj -o $@ ${@:.o=.ll}
-	llvm-strip ${XDP_OBJ} --no-strip-all -R .BTF
+	# llvm-strip ${XDP_OBJ} --no-strip-all -R .BTF

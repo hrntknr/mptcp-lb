@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <linux/bpf.h>
 #include <linux/if_ether.h>
 #include <linux/ip.h>
@@ -17,13 +18,13 @@
     if ((void *)(target + 1) > end) \
         return XDP_DROP;
 
-struct services_key
+struct service_dst
 {
     __u8 addr[16];
     __u16 port;
 };
 
-struct services_value
+struct upstream
 {
     __u8 addr[16];
     __u16 port;
@@ -31,31 +32,59 @@ struct services_value
 
 struct bpf_map_def SEC("maps") services = {
     .type = BPF_MAP_TYPE_ARRAY_OF_MAPS,
-    .key_size = sizeof(struct services_key),
-    .value_size = sizeof(struct services_value),
+    .key_size = sizeof(struct service_dst),
+    .value_size = sizeof(struct upstream),
     .max_entries = MAX_SERVICE_COUNT,
 };
+
+static inline int process_vip(struct xdp_md *ctx, struct ethhdr *eth, struct ip6_hdr *ipv6, struct tcphdr *tcp, struct upstream *service)
+{
+    struct upstream *upstream;
+    __u32 index = 0;
+    unsigned char tmp[ETH_ALEN];
+
+    upstream = bpf_map_lookup_elem(service, &index);
+
+    memcpy(tmp, eth->h_source, sizeof(unsigned char) * ETH_ALEN);
+    memcpy(eth->h_source, eth->h_dest, sizeof(unsigned char) * ETH_ALEN);
+    memcpy(eth->h_dest, tmp, sizeof(unsigned char) * ETH_ALEN);
+
+    if (upstream == NULL)
+        return XDP_DROP;
+
+    memcpy(ipv6->ip6_dst.in6_u.u6_addr8, upstream->addr, sizeof(__u8) * 16);
+#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+    tcp->dest = __builtin_bswap16(upstream->port);
+#else
+    tcp->dest = upstream->port;
+#endif
+
+    return XDP_TX;
+}
 
 static inline int process_tcphdr(struct xdp_md *ctx, struct ethhdr *eth, struct ip6_hdr *ipv6)
 {
     void *data_end = (void *)(long)ctx->data_end;
     struct tcphdr *tcp = (struct tcphdr *)(ipv6 + 1);
 
-    struct services_key key = {};
-    struct services_value *service;
+    struct service_dst key = {};
+    struct upstream *service;
 
     assert_len(tcp, data_end);
 
-    for (int i = 0; i < 16; i++)
-        key.addr[i] = ipv6->ip6_dst.in6_u.u6_addr8[i];
+    memcpy(key.addr, ipv6->ip6_dst.in6_u.u6_addr8, sizeof(__u8) * 16);
+#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+    key.port = __builtin_bswap16(tcp->dest);
+#else
     key.port = tcp->dest;
+#endif
 
     service = bpf_map_lookup_elem(&services, &key);
 
     if (service == NULL)
         return XDP_PASS;
 
-    return XDP_DROP;
+    return process_vip(ctx, eth, ipv6, tcp, service);
 }
 
 static inline int process_ipv6hdr(struct xdp_md *ctx, struct ethhdr *eth)

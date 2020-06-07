@@ -1,0 +1,84 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+
+$install_common = <<-SHELL
+apt-get update
+apt-get upgrade -y
+apt-get install curl
+
+curl -s https://deb.frrouting.org/frr/keys.asc | APT_KEY_DONT_WARN_ON_DANGEROUS_USAGE=1 apt-key add -
+echo deb https://deb.frrouting.org/frr $(lsb_release -s -c) frr-stable | tee -a /etc/apt/sources.list.d/frr.list
+apt-get update
+apt-get install -y frr frr-pythontools
+echo "net.ipv6.conf.all.forwarding=1" >> /etc/sysctl.conf
+sysctl -p
+cp /vagrant/config/daemons /etc/frr/daemons
+cp /vagrant/config/frr-$(hostname).conf /etc/frr/frr.conf
+systemctl restart frr
+SHELL
+
+$install_lb = <<-SHELL
+apt-get update
+apt-get install -y clang llvm libelf-dev libpcap-dev gcc-multilib build-essential
+
+wget -q https://dl.google.com/go/go1.14.4.linux-amd64.tar.gz
+tar -C /usr/local -xzf go1.14.4.linux-amd64.tar.gz
+ln -s /usr/local/go/bin/go /usr/local/bin/
+ln -s /usr/local/go/bin/gofmt /usr/local/bin/
+
+chown -R vagrant:vagrant /home/vagrant/go
+
+ip -6 addr add fc00::1/128 dev lo
+ip -6 route add local fc01::/64 dev lo
+SHELL
+
+$inline_origin = <<-SHELL
+apt-get update
+apt-get install -y nginx
+
+cp /vagrant/config/nginx.conf /etc/nginx/sites-available/default
+systemctl restart nginx
+
+ip6tables -t nat -A POSTROUTING -p tcp --sport 80 -j SNAT --to-source fc00::1
+SHELL
+
+Vagrant.configure("2") do |config|
+  config.vm.box = "ubuntu/bionic64"
+  config.vm.box_check_update = false
+
+  config.vm.provider "virtualbox" do |vm|
+    vm.gui = false
+    vm.memory = 512
+    vm.cpus = 1
+    vm.customize ["modifyvm", :id, "--audio", "none"]
+  end
+  config.vm.define "rtr1" do |vm|
+    vm.vm.hostname = "rtr1"
+    vm.vm.network "private_network", ip: "fc10::1", netmask: "64", virtualbox__intnet: "rtr1-sh"
+    vm.vm.network "private_network", ip: "fc11::1", netmask: "64", virtualbox__intnet: "rtr1-lb1"
+    vm.vm.network "private_network", ip: "fc12::1", netmask: "64", virtualbox__intnet: "rtr1-origin1"
+    vm.vm.network "private_network", ip: "fc13::1", netmask: "64", virtualbox__intnet: "rtr1-origin2"
+    vm.vm.provision "shell", inline: $install_common
+  end
+  config.vm.define "sh" do |vm|
+    vm.vm.hostname = "sh"
+    vm.vm.network "private_network", ip: "fc10::2", netmask: "64", virtualbox__intnet: "rtr1-sh"
+    vm.vm.provision "shell", inline: $install_common
+  end
+  config.vm.define "lb1" do |vm|
+    vm.vm.hostname = "lb1"
+    vm.vm.network "private_network", ip: "fc11::2", netmask: "64", virtualbox__intnet: "rtr1-lb1"
+    vm.vm.provision "shell", inline: $install_common + $install_lb
+    vm.vm.synced_folder "../", "/home/vagrant/go/src/github.com/hrntknr/mptcp-lb"
+  end
+  config.vm.define "origin1" do |vm|
+    vm.vm.hostname = "origin1"
+    vm.vm.network "private_network", ip: "fc12::2", netmask: "64", virtualbox__intnet: "rtr1-origin1"
+    vm.vm.provision "shell", inline: $install_common + $inline_origin
+  end
+  config.vm.define "origin2" do |vm|
+    vm.vm.hostname = "origin2"
+    vm.vm.network "private_network", ip: "fc13::2", netmask: "64", virtualbox__intnet: "rtr1-origin2"
+    vm.vm.provision "shell", inline: $install_common + $inline_origin
+  end
+end

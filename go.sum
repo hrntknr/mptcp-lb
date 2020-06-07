@@ -1,9 +1,5 @@
 github.com/cilium/ebpf v0.0.0-20200601085316-9f1617e5c574 h1:G4qUgaciePbY+xCMxxseQhAet478x7qDMdYj3yJgsps=
 github.com/cilium/ebpf v0.0.0-20200601085316-9f1617e5c574/go.mod h1:XT+cAw5wfvsodedcijoh1l9cf7v1x9FlFB/3VmF/O8s=
-github.com/dropbox/goebpf v0.0.0-20200130180258-a6cc43282fbc h1:SvyKQUvRmOvEGqMJMPSKWlymGSCYBGQXloEmhY3KZWA=
-github.com/dropbox/goebpf v0.0.0-20200130180258-a6cc43282fbc/go.mod h1:VWU/Nojy1XodnYu8wlDTrwcdHxZNK6dfmDKFKX8N0qc=
-github.com/iovisor/gobpf v0.0.0-20200605125511-5e55cf63db66 h1:IIhTbrckyhUcJToYSuZQhukKDeWj2t1HINZput6nIf8=
-github.com/iovisor/gobpf v0.0.0-20200605125511-5e55cf63db66/go.mod h1:+5U5qu5UOu8YJ5oHVLvWKH7/Dr5QNHU7mZ2RfPEeXg8=
 github.com/jessevdk/go-flags v1.4.0 h1:4IU2WS7AumrZ/40jfhf4QVDMsQwqA7VEHozFRrGARJA=
 github.com/jessevdk/go-flags v1.4.0/go.mod h1:4FA24M0QyGHXBuZZK/XkWh8h0e1EYbRYJSGM75WSRxI=
 github.com/vishvananda/netlink v1.1.0 h1:1iyaYNBLmP6L0220aDnYQpo1QEV4t4hJ+xEEhhJH8j0=

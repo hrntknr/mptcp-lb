@@ -16,7 +16,7 @@ import (
 	"gopkg.in/yaml.v2"
 )
 
-const obj = "mptcp_lb_kern.o"
+const obj = "kern/mptcp_lb_kern.o"
 
 func main() {
 	if err := cmd(os.Args[1:]); err != nil {
@@ -55,7 +55,8 @@ func (s *servicesDst) MarshalBinary() (data []byte, err error) {
 	for i := 0; i < 16; i++ {
 		buf[i] = s.addr[i]
 	}
-	binary.BigEndian.PutUint16(buf[16:18], s.port)
+	// TODO: ebpf endian check
+	binary.LittleEndian.PutUint16(buf[16:18], s.port)
 	return buf[:], nil
 }
 
@@ -72,7 +73,8 @@ func (u *upstream) MarshalBinary() (data []byte, err error) {
 	for i := 0; i < 16; i++ {
 		buf[i] = u.addr[i]
 	}
-	binary.BigEndian.PutUint16(buf[16:18], u.port)
+	// TODO: ebpf endian check
+	binary.LittleEndian.PutUint16(buf[16:18], u.port)
 	return buf[:], nil
 }
 
@@ -161,13 +163,12 @@ func startLB(conf Config) error {
 				addr: u.Addr,
 				port: u.Port,
 			}
-			inner.Put(uint64(i), value)
+			inner.Put(uint32(i), value)
 		}
 		var key encoding.BinaryMarshaler = &servicesDst{
 			addr: serviceConf.VIP,
 			port: serviceConf.Port,
 		}
-		fmt.Println(key.MarshalBinary())
 
 		if err := services.Put(key, inner); err != nil {
 			return err

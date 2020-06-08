@@ -39,7 +39,6 @@ type ServiceConfig struct {
 
 type UpstreamConfig struct {
 	Addr net.IP `yaml:"addr"`
-	Port uint16 `yaml:"port"`
 }
 
 type servicesDst struct {
@@ -69,13 +68,7 @@ func (u *upstream) MarshalBinary() (data []byte, err error) {
 	if len(u.addr) != 16 {
 		return nil, fmt.Errorf("invalid vip: %s", u.addr)
 	}
-	buf := [18]byte{}
-	for i := 0; i < 16; i++ {
-		buf[i] = u.addr[i]
-	}
-	// TODO: ebpf endian check
-	binary.LittleEndian.PutUint16(buf[16:18], u.port)
-	return buf[:], nil
+	return u.addr, nil
 }
 
 var opts struct {
@@ -134,7 +127,7 @@ func startLB(conf Config) error {
 		InnerMap: &ebpf.MapSpec{
 			Type:       ebpf.Array,
 			KeySize:    4,
-			ValueSize:  18,
+			ValueSize:  16,
 			MaxEntries: 64,
 		},
 	}
@@ -161,7 +154,6 @@ func startLB(conf Config) error {
 		for i, u := range serviceConf.Upstream {
 			var value encoding.BinaryMarshaler = &upstream{
 				addr: u.Addr,
-				port: u.Port,
 			}
 			inner.Put(uint32(i), value)
 		}

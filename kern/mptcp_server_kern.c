@@ -12,64 +12,54 @@
 #include "bpf_helpers.h"
 #include "bpf_endian.h"
 
-#define MAX_SERVICE_COUNT 64
-
 #define assert_len(target, end)     \
     if ((void *)(target + 1) > end) \
         return XDP_DROP;
 
-struct service_dst
-{
-    __u8 addr[16];
-    __u16 port;
+const __u8 vip[16] = {
+    0xfc,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x01,
 };
 
-struct upstream
+static inline int dnat(struct xdp_md *ctx, struct ethhdr *eth, struct ip6_hdr *ipv6, struct tcphdr *tcp)
 {
-    __u8 addr[16];
-};
-
-struct bpf_map_def SEC("maps") services = {
-    .type = BPF_MAP_TYPE_ARRAY_OF_MAPS,
-    .key_size = sizeof(struct service_dst),
-    .value_size = sizeof(struct upstream),
-    .max_entries = MAX_SERVICE_COUNT,
-};
-
-static inline int process_vip(struct xdp_md *ctx, struct ethhdr *eth, struct ip6_hdr *ipv6, struct tcphdr *tcp, struct upstream *service)
-{
-    struct upstream *upstream;
-    __u32 index = 0;
-    unsigned char tmp[ETH_ALEN];
     unsigned long sum = tcp->check ^ 0xffff;
 
-    upstream = bpf_map_lookup_elem(service, &index);
-    if (upstream == NULL)
+    if (sizeof(vip) / sizeof(vip[0]) < 16)
         return XDP_DROP;
-
-    memcpy(tmp, eth->h_source, sizeof(unsigned char) * ETH_ALEN);
-    memcpy(eth->h_source, eth->h_dest, sizeof(unsigned char) * ETH_ALEN);
-    memcpy(eth->h_dest, tmp, sizeof(unsigned char) * ETH_ALEN);
-    // ipv6->ip6_ctlun.ip6_un1.ip6_un1_flow = bpf_htons(0);
 
     for (int i = 0; i < 8; i++)
     {
 #if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
-        sum += upstream->addr[i * 2 + 1] << 8 | upstream->addr[i * 2];
+        sum += vip[i * 2 + 1] << 8 | vip[i * 2];
         sum -= ipv6->ip6_dst.in6_u.u6_addr8[i * 2 + 1] << 8 | ipv6->ip6_dst.in6_u.u6_addr8[i * 2];
 #else
-        sum += upstream->addr[i * 2] << 8 | upstream->addr[i * 2 + 1];
+        sum += vip[i * 2] << 8 | vip[i * 2 + 1];
         sum -= ipv6->ip6_dst.in6_u.u6_addr8[i * 2] << 8 | ipv6->ip6_dst.in6_u.u6_addr8[i * 2 + 1];
 #endif
     }
 
-    memcpy(ipv6->ip6_dst.in6_u.u6_addr8, upstream->addr, sizeof(__u8) * 16);
+    memcpy(ipv6->ip6_dst.in6_u.u6_addr8, vip, sizeof(__u8) * 16);
 
     sum = (sum & 0xffff) + (sum >> 16);
     sum = (sum & 0xffff) + (sum >> 16);
     tcp->check = sum ^ 0xffff;
 
-    return XDP_TX;
+    return XDP_PASS;
 }
 
 static inline int process_tcphdr(struct xdp_md *ctx, struct ethhdr *eth, struct ip6_hdr *ipv6)
@@ -77,24 +67,9 @@ static inline int process_tcphdr(struct xdp_md *ctx, struct ethhdr *eth, struct 
     void *data_end = (void *)(long)ctx->data_end;
     struct tcphdr *tcp = (struct tcphdr *)(ipv6 + 1);
 
-    struct service_dst key = {};
-    struct upstream *service;
-
     assert_len(tcp, data_end);
 
-    memcpy(key.addr, ipv6->ip6_dst.in6_u.u6_addr8, sizeof(__u8) * 16);
-#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
-    key.port = __builtin_bswap16(tcp->dest);
-#else
-    key.port = tcp->dest;
-#endif
-
-    service = bpf_map_lookup_elem(&services, &key);
-
-    if (service == NULL)
-        return XDP_PASS;
-
-    return process_vip(ctx, eth, ipv6, tcp, service);
+    return dnat(ctx, eth, ipv6, tcp);
 }
 
 static inline int process_ipv6hdr(struct xdp_md *ctx, struct ethhdr *eth)
@@ -106,6 +81,9 @@ static inline int process_ipv6hdr(struct xdp_md *ctx, struct ethhdr *eth)
 
     if (ipv6->ip6_ctlun.ip6_un1.ip6_un1_nxt != IPPROTO_TCP)
         return XDP_PASS;
+
+    // if (ipv6->ip6_ctlun.ip6_un1.ip6_un1_flow != bpf_htons(1))
+    //     return XDP_PASS;
 
     return process_tcphdr(ctx, eth, ipv6);
 }

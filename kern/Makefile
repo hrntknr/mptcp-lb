@@ -1,4 +1,5 @@
-TARGET := mptcp_lb
+TARGET_LB := mptcp_lb
+TARGET_SERVER := mptcp_server
 
 LLC ?= llc
 CLANG ?= clang
@@ -6,10 +7,10 @@ CC ?= gcc
 
 LIBBPF_DIR = ./libbpf/src/
 
-XDP_C = ${TARGET:=_kern.c}
-XDP_OBJ = ${XDP_C:.c=.o}
-USER_C = ${TARGET:=_user.c}
-USER_OBJ = ${USER_C:.c=.o}
+LB_C = ${TARGET_LB:=_kern.c}
+LB_OBJ = ${LB_C:.c=.o}
+SERVER_C = ${TARGET_SERVER:=_kern.c}
+SERVER_OBJ = ${SERVER_C:.c=.o}
 OBJECT_LIBBPF = $(LIBBPF_DIR)/libbpf.a
 
 CFLAGS ?= -I$(LIBBPF_DIR)
@@ -17,14 +18,14 @@ LDFLAGS ?= -L$(LIBBPF_DIR)
 
 LIBS = -lbpf -lelf
 
-all: llvm-check $(XDP_OBJ)
+all: llvm-check $(LB_OBJ) llvm-check $(SERVER_OBJ)
 
 .PHONY: clean $(CLANG) $(LLC)
 
 clean:
 	cd $(LIBBPF_DIR) && $(MAKE) clean;
-	rm -f $(XDP_OBJ)
-	rm -f $(USER_OBJ)
+	rm -f $(LB_OBJ)
+	rm -f $(SERVER_OBJ)
 	rm -f *.ll
 
 llvm-check: $(CLANG) $(LLC)
@@ -45,7 +46,7 @@ $(OBJECT_LIBBPF):
 		mkdir -p root; DESTDIR=root $(MAKE) install_headers; \
 	fi
 
-$(XDP_OBJ): %.o: %.c
+$(LB_OBJ): %.o: %.c
 	$(CLANG) -S \
 	    -D __BPF_TRACING__ \
 	    $(CFLAGS) \
@@ -54,4 +55,13 @@ $(XDP_OBJ): %.o: %.c
 	    -Wno-compare-distinct-pointer-types \
 	    -O2 -emit-llvm -c -g $<
 	$(LLC) -march=bpf -filetype=obj -o $@ ${@:.o=.ll}
-	# llvm-strip ${XDP_OBJ} --no-strip-all -R .BTF
+
+$(SERVER_OBJ): %.o: %.c
+	$(CLANG) -S \
+	    -D __BPF_TRACING__ \
+	    $(CFLAGS) \
+	    -Wall \
+	    -Wno-unused-value -Wno-pointer-sign \
+	    -Wno-compare-distinct-pointer-types \
+	    -O2 -emit-llvm -c -g $<
+	$(LLC) -march=bpf -filetype=obj -o $@ ${@:.o=.ll}

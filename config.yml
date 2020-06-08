@@ -4,6 +4,4 @@ services:
     addr_pool: fc01::/64
     upstream:
       - addr: fc12::2
-        port: 80
       - addr: fc13::2
-        port: 80

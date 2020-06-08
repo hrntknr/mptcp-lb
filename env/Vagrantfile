@@ -39,7 +39,9 @@ apt-get install -y nginx
 cp /vagrant/config/nginx.conf /etc/nginx/sites-available/default
 systemctl restart nginx
 
-ip6tables -t nat -A POSTROUTING -p tcp --sport 80 -j SNAT --to-source fc00::1
+ip -6 addr add fc00::1/128 dev lo
+ip -6 route add local fc01::/64 dev lo
+# ここのアドレスはbgpでお漏らししないアドレス
 SHELL
 
 Vagrant.configure("2") do |config|

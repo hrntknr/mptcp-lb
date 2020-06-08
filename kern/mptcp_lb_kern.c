@@ -42,6 +42,7 @@ static inline int process_vip(struct xdp_md *ctx, struct ethhdr *eth, struct ip6
     struct upstream *upstream;
     __u32 index = 0;
     unsigned char tmp[ETH_ALEN];
+    unsigned long sum = tcp->check ^ 0xffff;
 
     upstream = bpf_map_lookup_elem(service, &index);
 
@@ -52,12 +53,27 @@ static inline int process_vip(struct xdp_md *ctx, struct ethhdr *eth, struct ip6
     if (upstream == NULL)
         return XDP_DROP;
 
+    for (int i = 0; i < 8; i++)
+    {
+#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+        sum += upstream->addr[i * 2 + 1] << 8 | upstream->addr[i * 2];
+        sum -= ipv6->ip6_dst.in6_u.u6_addr8[i * 2 + 1] << 8 | ipv6->ip6_dst.in6_u.u6_addr8[i * 2];
+#else
+        sum += upstream->addr[i * 2] << 8 | upstream->addr[i * 2 + 1];
+        sum -= ipv6->ip6_dst.in6_u.u6_addr8[i * 2] << 8 | ipv6->ip6_dst.in6_u.u6_addr8[i * 2 + 1];
+#endif
+    }
+
     memcpy(ipv6->ip6_dst.in6_u.u6_addr8, upstream->addr, sizeof(__u8) * 16);
 #if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
     tcp->dest = __builtin_bswap16(upstream->port);
 #else
     tcp->dest = upstream->port;
 #endif
+
+    sum = (sum & 0xffff) + (sum >> 16);
+    sum = (sum & 0xffff) + (sum >> 16);
+    tcp->check = sum ^ 0xffff;
 
     return XDP_TX;
 }

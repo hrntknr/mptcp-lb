@@ -39,30 +39,25 @@ struct bpf_map_def SEC("maps") services = {
 static inline int process_vip(struct xdp_md *ctx, struct ethhdr *eth, struct ip6_hdr *ipv6, struct tcphdr *tcp, struct upstream *service)
 {
     struct upstream *upstream;
-    __u32 index = 0;
-    unsigned char tmp[ETH_ALEN];
-    unsigned long sum = tcp->check ^ 0xffff;
+    __u64 index = 0;
+    __u8 tmp[ETH_ALEN];
+    __u64 sum = tcp->check ^ 0xffff;
 
     upstream = bpf_map_lookup_elem(service, &index);
     if (upstream == NULL)
         return XDP_DROP;
 
-    memcpy(tmp, eth->h_source, sizeof(unsigned char) * ETH_ALEN);
-    memcpy(eth->h_source, eth->h_dest, sizeof(unsigned char) * ETH_ALEN);
-    memcpy(eth->h_dest, tmp, sizeof(unsigned char) * ETH_ALEN);
+    memcpy(tmp, eth->h_source, sizeof(__u8) * ETH_ALEN);
+    memcpy(eth->h_source, eth->h_dest, sizeof(__u8) * ETH_ALEN);
+    memcpy(eth->h_dest, tmp, sizeof(__u8) * ETH_ALEN);
     ipv6->ip6_ctlun.ip6_un1.ip6_un1_flow =
         (ipv6->ip6_ctlun.ip6_un1.ip6_un1_flow & 0xf00fffff) |
         (htonl(1) << 20 & 0x0ff00000);
 
     for (int i = 0; i < 8; i++)
     {
-#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
-        sum += upstream->addr[i * 2 + 1] << 8 | upstream->addr[i * 2];
-        sum -= ipv6->ip6_dst.in6_u.u6_addr8[i * 2 + 1] << 8 | ipv6->ip6_dst.in6_u.u6_addr8[i * 2];
-#else
-        sum += upstream->addr[i * 2] << 8 | upstream->addr[i * 2 + 1];
-        sum -= ipv6->ip6_dst.in6_u.u6_addr8[i * 2] << 8 | ipv6->ip6_dst.in6_u.u6_addr8[i * 2 + 1];
-#endif
+        sum += *(__u16 *)&upstream->addr[i * 2];
+        sum -= *(__u16 *)&ipv6->ip6_dst.in6_u.u6_addr8[i * 2];
     }
 
     memcpy(ipv6->ip6_dst.in6_u.u6_addr8, upstream->addr, sizeof(__u8) * 16);
@@ -85,11 +80,7 @@ static inline int process_tcphdr(struct xdp_md *ctx, struct ethhdr *eth, struct 
     assert_len(tcp, data_end);
 
     memcpy(key.addr, ipv6->ip6_dst.in6_u.u6_addr8, sizeof(__u8) * 16);
-#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
-    key.port = __builtin_bswap16(tcp->dest);
-#else
-    key.port = tcp->dest;
-#endif
+    key.port = __bpf_ntohs(tcp->dest);
 
     service = bpf_map_lookup_elem(&services, &key);
 

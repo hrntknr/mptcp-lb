@@ -82,8 +82,8 @@ static inline int process_ipv6hdr(struct xdp_md *ctx, struct ethhdr *eth)
     if (ipv6->ip6_ctlun.ip6_un1.ip6_un1_nxt != IPPROTO_TCP)
         return XDP_PASS;
 
-    // if (ipv6->ip6_ctlun.ip6_un1.ip6_un1_flow != bpf_htons(1))
-    //     return XDP_PASS;
+    if ((ipv6->ip6_ctlun.ip6_un1.ip6_un1_flow & 0x0ff00000) >> 20 != htonl(1))
+        return XDP_PASS;
 
     return process_tcphdr(ctx, eth, ipv6);
 }

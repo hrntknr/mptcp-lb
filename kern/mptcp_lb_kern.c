@@ -50,7 +50,9 @@ static inline int process_vip(struct xdp_md *ctx, struct ethhdr *eth, struct ip6
     memcpy(tmp, eth->h_source, sizeof(unsigned char) * ETH_ALEN);
     memcpy(eth->h_source, eth->h_dest, sizeof(unsigned char) * ETH_ALEN);
     memcpy(eth->h_dest, tmp, sizeof(unsigned char) * ETH_ALEN);
-    // ipv6->ip6_ctlun.ip6_un1.ip6_un1_flow = bpf_htons(0);
+    ipv6->ip6_ctlun.ip6_un1.ip6_un1_flow =
+        (ipv6->ip6_ctlun.ip6_un1.ip6_un1_flow & 0xf00fffff) |
+        (htonl(1) << 20 & 0x0ff00000);
 
     for (int i = 0; i < 8; i++)
     {

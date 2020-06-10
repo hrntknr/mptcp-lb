@@ -13,10 +13,33 @@
 #include "bpf_endian.h"
 
 #define MAX_SERVICE_COUNT 64
+#define cROUNDS 2
+#define dROUNDS 4
 
 #define assert_len(target, end)     \
     if ((void *)(target + 1) > end) \
         return XDP_DROP;
+
+#define ROTATE(x, b) (__u64)(((x) << (b)) | ((x) >> (64 - (b))))
+
+#define HALF_ROUND(a, b, c, d, s, t) \
+    a += b;                          \
+    c += d;                          \
+    b = ROTATE(b, s) ^ a;            \
+    d = ROTATE(d, t) ^ c;            \
+    a = ROTATE(a, 32);
+
+#define DOUBLE_ROUND(v0, v1, v2, v3)    \
+    HALF_ROUND(v0, v1, v2, v3, 13, 16); \
+    HALF_ROUND(v2, v1, v0, v3, 17, 21); \
+    HALF_ROUND(v0, v1, v2, v3, 13, 16); \
+    HALF_ROUND(v2, v1, v0, v3, 17, 21);
+
+#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+#define _le64toh(x) ((__u64)(x))
+#else
+#define _le64toh(x) le64toh(x)
+#endif
 
 struct service_dst
 {
@@ -36,12 +59,77 @@ struct bpf_map_def SEC("maps") services = {
     .max_entries = MAX_SERVICE_COUNT,
 };
 
+inline static __u64 siphash(const void *src, size_t inlen, __u8 *key)
+{
+    const __u64 *_key = (__u64 *)key;
+    __u64 k0 = _le64toh(_key[0]);
+    __u64 k1 = _le64toh(_key[1]);
+    __u64 b = (__u64)inlen << 56;
+    const __u64 *in = (__u64 *)src;
+
+    __u64 v0 = k0 ^ 0x736f6d6570736575ULL;
+    __u64 v1 = k1 ^ 0x646f72616e646f6dULL;
+    __u64 v2 = k0 ^ 0x6c7967656e657261ULL;
+    __u64 v3 = k1 ^ 0x7465646279746573ULL;
+
+    while (inlen >= 8)
+    {
+        __u64 mi = _le64toh(*in);
+        in += 1;
+        inlen -= 8;
+        v3 ^= mi;
+        DOUBLE_ROUND(v0, v1, v2, v3);
+        v0 ^= mi;
+    }
+
+    __u64 t = 0;
+    __u8 *pt = (__u8 *)&t;
+    __u8 *m = (__u8 *)in;
+    switch (inlen)
+    {
+    case 7:
+        pt[6] = m[6];
+    case 6:
+        pt[5] = m[5];
+    case 5:
+        pt[4] = m[4];
+    case 4:
+        *((__u32 *)&pt[0]) = *((__u32 *)&m[0]);
+        break;
+    case 3:
+        pt[2] = m[2];
+    case 2:
+        pt[1] = m[1];
+    case 1:
+        pt[0] = m[0];
+    }
+    b |= _le64toh(t);
+
+    v3 ^= b;
+    DOUBLE_ROUND(v0, v1, v2, v3);
+    v0 ^= b;
+    v2 ^= 0xff;
+    DOUBLE_ROUND(v0, v1, v2, v3);
+    DOUBLE_ROUND(v0, v1, v2, v3);
+    return (v0 ^ v1) ^ (v2 ^ v3);
+}
+
+static inline __u64 select_server(__u8 *addr, __u64 count)
+{
+    __u8 key[16] = {0x00, 0x00, 0x00, 0x00, 0xde, 0xad, 0xba, 0xbe, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+    __u64 hash = siphash(addr, sizeof(__u8) * 16, key);
+    return hash % count;
+}
+
 static inline int process_vip(struct xdp_md *ctx, struct ethhdr *eth, struct ip6_hdr *ipv6, struct tcphdr *tcp, struct upstream *service)
 {
     struct upstream *upstream;
     __u64 index = 0;
+    __u64 count = 2;
     __u8 tmp[ETH_ALEN];
     __u64 sum = tcp->check ^ 0xffff;
+
+    index = select_server(ipv6->ip6_src.in6_u.u6_addr8, count);
 
     upstream = bpf_map_lookup_elem(service, &index);
     if (upstream == NULL)
